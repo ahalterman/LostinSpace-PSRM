@@ -38,16 +38,16 @@ special.characters<-c(
 #load data
 # current.path<-getwd()
 # setwd(syria.path)
-syria_province<-read.csv("syria_province.csv")
-names=c(str_trim(as.character(tolower(syria_province$governorate))))
-names<-unique(names[order(names)])
+syria_province <- read.csv("syria_province.csv")
+names <- c(str_trim(as.character(tolower(syria_province$governorate))))
+names <- unique(names[order(names)])
 names
 
 
 
 #### 2) ACTOR DICTIONARY ####
 
-syria.sentences<-sentencify(data$cleantext, solutions=data$province_human, namespace=names, text_id=data$story_id)
+syria.sentences <- sentencify(data$cleantext, solutions=data$province_human, namespace=names, text_id=data$story_id)
 
 # actor dictionary (these are not very helpful)
 # raw_syria<-read.csv("       ") # this file contains FACTIVA proprietary contents and hence can't be released.
@@ -292,7 +292,7 @@ sources2<-c('AP','CNN','AFP', 'Xinhua News Agency', 'Reuters', 'Yonhap', #some c
 )
 sources3<-c('Xinhua',"News","report","radio","press","ap")
 
-sources<-apply(as.data.frame(sources), 1, 
+sources<-apply(as.data.frame(sources1), 1, 
                function(word) as.character(as.String(tm_map(VCorpus(VectorSource(word)), 
                                                             stemDocument)[[1]]$content)) )
 
@@ -303,7 +303,7 @@ sources2<-apply(as.data.frame(sources2), 1,
 sources3<-apply(as.data.frame(sources3), 1, 
                function(word) as.character(as.String(tm_map(VCorpus(VectorSource(word)), 
                                                             stemDocument)[[1]]$content)) )
-
+# SHOULD THESE ALL BE COMBINED INTO ONE "sources"??
 
 #delete raw_egypt to save the memory
 #rm(raw_egypt)
