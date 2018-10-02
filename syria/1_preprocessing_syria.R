@@ -8,18 +8,13 @@
 
 
 ############ 0) SET UP ###############
-base.path<- " "
-r.path<-paste0(base.path, "/Rcodes")
-syria.path<-paste0(base.path, "/syria")
 # load packages/ helper functions (manually defined)
-setwd(r.path)
-source("setup.R", echo=T, print.eval = T)
-source("functions.R", echo=T, print.eval = T)
+source("../Rcodes/setup.R", echo=T, print.eval = T)
+source("../Rcodes/functions.R", echo=T, print.eval = T)
 
 
 ######### 1) Building Dictionaries ########
 # load dictionaries pre-defined for the dataset
-setwd(syria.path)
 source("dictionary_syria.R", echo=T, print.eval = T)
 ## --> "syria_province" & "names" have been created.
 ## --> dictionaries have been created as well.
@@ -28,7 +23,8 @@ source("dictionary_syria.R", echo=T, print.eval = T)
 
 ######## 2) Pre-treatment (text cleaning) ########
 
-syria_data<-read.csv("syria_data_raw.csv")
+syria_data <- read.csv("syria_test.csv")
+# This CSV must have the following columns: id,text,province_original,province_oeda
 texts<-as.character(iconv(syria_data$text, "ASCII", "utf-8", sub=" "))
 
 
@@ -176,7 +172,7 @@ data$province_oeda[is.na(data$province_oeda)]<-"no_loc"
 
 
 # save the data
-write.csv(data, "syria_cleantext.csv")
+write.csv(data, "syria_cleantext_test.csv")
 # rm(syria_data)
 
 

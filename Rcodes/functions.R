@@ -251,7 +251,12 @@ incNgrams<-function(texts, namespace, solution, min_run, max_run){ #build lists 
   return(Ngrams_incorrect)
 }
 
-corNgrams<-function(texts, namespace, solution, min_run, max_run){ #build lists with ngrams of inccorrect location words and store as a list
+corNgrams<-function(texts, namespace, solution, min_run, max_run){ 
+  #build lists with ngrams of inccorrect location words and store as a list
+  # texts: vector of characters, preprocessed (e.g. "ACTAR  NONTOPIC on  DAYZ nesday   dispatch   N  ACTAR  to  frontlin in neighbor")
+  # namespace: a vector of lower case province names to search for
+  # solution: vector of human-provided province names (multiple if needed: "aleppo , hama , idlib ")
+  # min_run/max_run : ints, just used for RWeka??
   if(missing(min_run)){
     min_run=2  }
   if(missing(max_run)){
@@ -405,8 +410,8 @@ buildNgram1<-function(texts, namespace, Ngrams_correct, Ngrams_incorrect, min, m
     # helper function
     my.max <- function(x) ifelse( !all(is.na(x)), max(x, na.rm=T), NA) 
     
-    n=length(texts)
-    k=m-(min-1)
+    n <- length(texts)
+    k <- m - (min - 1)
     covar=NULL #one covar per each m pair
     for(i in 1:n){  # for each text
       
@@ -417,44 +422,42 @@ buildNgram1<-function(texts, namespace, Ngrams_correct, Ngrams_incorrect, min, m
       # the matrix represents the values of correct & incorrect N-gram
       
       #if the i-th text contains no location words, then the value becomes (NA, NA)
-      if(length(which(TF==TRUE))==0){var<-matrix(c(NA, NA), nrow=1)}else{
-        
-        
+      if(sum(TF)==0) {
+        var <- matrix(c(NA, NA), nrow=1)
+        } else {
         for(j in 1:length(locations)){ # for each location word
-          
-          
-          prep <-texts[i]
+          prep <- texts[i]
           #more text generalization: change all other location names to "OTHERLOCZ"
-          namespace.2<-namespace[-which(namespace==locations[j])]
+          namespace.2 <- namespace[-which(namespace==locations[j])]
           for(t in namespace.2){
-            prep<-str_replace_all(prep, t, "OTHERLOCZ")
+            prep <- str_replace_all(prep, t, "OTHERLOCZ")
           }
           
           #split text into sentences
           prep <-str_split(prep, "\\.")[[1]]
           
           # generate N gram list 
-          test<-NGramTokenizer(prep, Weka_control(min=m,max=m))  #RWeka   
+          test <- NGramTokenizer(prep, Weka_control(min=m,max=m))  #RWeka   
           
           # Now capture those containing the the j-th location word in the locations vector
-          temp<-test[which(!is.na(str_match(test, locations[j])))]
+          temp <- test[which(!is.na(str_match(test, locations[j])))]
           
           # more generalization: distinguish sub-location names (converted) from the province names (written as is)
-          temp<-str_replace_all(temp, "sub_(.*?)\\b", "SUBLOC")
+          temp <- str_replace_all(temp, "sub_(.*?)\\b", "SUBLOC")
           
           #final generalization: convert the current location name to a code: "LOCZ"
-          temp<-str_replace_all(temp, locations[j], "LOCZ")
+          temp <- str_replace_all(temp, locations[j], "LOCZ")
           
           
           #now calculate the frequency rates!
-          t<-length(temp)
-          if(t>0){
-            inc<-cor<-NULL
+          t <- length(temp)
+          if(t>0) {
+            inc <- cor <- NULL
             for(s in 1:t){ # for each collocation pattern
               # match in the incorect corpus
-              no<-which(temp[s]==Ngrams_incorrect[[k]][[1]]$phrases)
-              if(length(no)==0){
-                inc<-sum(inc, 1)#/sum(Ngrams_incorrect[[k]][[1]]$Freq))
+              no <- which(temp[s]==Ngrams_incorrect[[k]][[1]]$phrases)
+              if(length(no)==0) {
+                inc<-sum(inc, 1) #/sum(Ngrams_incorrect[[k]][[1]]$Freq))
               } else{
                 inc<-sum(inc, (Ngrams_incorrect[[k]][[1]]$Freq[no]+1 ))#/sum(Ngrams_incorrect[[k]][[1]]$Freq) )
                 #       prob_inc= -prob_inc
