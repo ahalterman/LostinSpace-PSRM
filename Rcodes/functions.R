@@ -161,19 +161,19 @@ sentencify<-function(texts, solutions, namespace, text_id=c(1:length(texts))){#(
 
 
 ## create the Ngram corpus
-incNgrams<-function(texts, namespace, solution, min, max){ #build lists with ngrams of inccorrect location words and store as a list
+incNgrams<-function(texts, namespace, solution, min_run, max_run){ #build lists with ngrams of inccorrect location words and store as a list
   
-  if(missing(min)){
-    min=2  }
-  if(missing(max)){
-    max=7  }
+  if(missing(min_run)){
+    min_run=2  }
+  if(missing(max_run)){
+    max_run=7  }
   
   #parallelization for faster running time
   require(doParallel)#parallelization
   cluster=makeCluster(6)#parallelization
   registerDoParallel(cluster)#parallelization
   
-  Ngrams_incorrect <<- foreach(m=min:max) %dopar%{#parallelization
+  Ngrams_incorrect <<- foreach(m=min_run:max_run) %dopar%{#parallelization
     # call necessary functions in the new cluster  
     library(stringr) #str_detect
     library(RWeka) #NGramTokenizer
@@ -185,7 +185,7 @@ incNgrams<-function(texts, namespace, solution, min, max){ #build lists with ngr
     for(i in 1:n){
 
       # search 
-      TF<-str_detect(texts[i], namespace)
+      TF<-str_detect(texts[i], namespace)  # "namespace" is a set of defined place names (provinces) to search for
       
       if(length(which(TF==TRUE))>0){
         locations<-namespace[which(TF==TRUE)]
@@ -251,18 +251,18 @@ incNgrams<-function(texts, namespace, solution, min, max){ #build lists with ngr
   return(Ngrams_incorrect)
 }
 
-corNgrams<-function(texts, namespace, solution, min, max){#build lists with ngrams of inccorrect location words and store as a list
-  if(missing(min)){
-    min=2  }
-  if(missing(max)){
-    max=7  }
+corNgrams<-function(texts, namespace, solution, min_run, max_run){ #build lists with ngrams of inccorrect location words and store as a list
+  if(missing(min_run)){
+    min_run=2  }
+  if(missing(max_run)){
+    max_run=7  }
   
   #parallelization for faster running time
   require(doParallel)#parallelization
   cluster=makeCluster(6)#parallelization
   registerDoParallel(cluster)#parallelization
   
-  Ngrams_correct <<- foreach(m=min:max) %dopar%{#parallelization
+  Ngrams_correct <<- foreach(m=min_run:max_run) %dopar%{#parallelization
     # call necessary functions in the new cluster  
     library(stringr) #str_detect
     library(RWeka) #NGramTokenizer
@@ -343,13 +343,15 @@ corNgrams<-function(texts, namespace, solution, min, max){#build lists with ngra
 
 ## this function builds the data frame "binary_data" 
 buildY<-function(texts, namespace, solution, text_no){# (unit of observation=each location word) where binary takes 1 if the location word is correct.
+  # "namespace" is a vector of place names to search for.
+  # not sure what "text_no" is...
   
   n=length(texts)  
   l=t=y=no_location=NULL
   for(i in 1:n){
     
     # search 
-    TF<-str_detect(texts[i], namespace)
+    TF<-str_detect(texts[i], namespace)  # this is the "NER" step: search for defined place names
     
     if(length(which(TF==TRUE))>0){
       locations<-namespace[which(TF==TRUE)]
