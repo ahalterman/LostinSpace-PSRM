@@ -1,21 +1,21 @@
-
 # To get the results from the Syria data, you only need to run this code.
 
 ##### Set up #####
-rm(list=ls())
-# frequently used paths
-base.path<-"      " # set up the base bath (default: "base.path<-getwd()" )
-r.path<-paste0(base.path, "/Rcodes")
-syria.path<-paste0(base.path, "/syria")
+# the working directory should be set to the "syria" dir
 # load packages/ helper functions (manually defined) 
-setwd(r.path) 
-source("setup.R", echo=T, print.eval = T)
-source("functions.R", echo=T, print.eval = T)
+source("../Rcodes/setup.R", echo=T, print.eval = T)
+source("../Rcodes/functions.R", echo=T, print.eval = T)
+#source("../Rcodes/Java_issue_patch.R", echo=T, print.eval = T)
+
 # load dictionaries pre-defined for the dataset
-setwd(syria.path)
-source("dictionary_syria.R", echo=T, print.eval = T)
+## I think this only has to run if you're regenerating from the raw text??
+# source("dictionary_syria.R", echo=T, print.eval = T)
 ## --> "syria_province" & "names" have been created.
 ## --> action verb dictionaries have been created as well.
+# But need the "names" object below. Copy over just that part
+syria_province <- read.csv("syria_province.csv")
+names <- c(str_trim(as.character(tolower(syria_province$governorate))))
+names <- unique(names[order(names)])
 
 #load data
 syria_data<-read.csv('syria_cleantext.csv') #text files pre-treated. (output from text_treatment_syria.R)
@@ -36,6 +36,70 @@ syria_data$story_id<-as.character(syria_data$id)
 ######## Step 1:  Feature Selection ########
 
 
+feature_maker <- function(data, names, Ngrams_incorrect, Ngrams_correct){
+  # build the Dependent variable based on human coding (1: correct event location, 0: otherwise)
+  binary_data <- buildY(texts=data$cleantext,  
+                      namespace=names,
+                      solution=as.character(data$province_human), 
+                      text_no=data$story_id)
+  
+  # VAR 1 - Ngram) Ngram variable type 1 - rates within articles
+  ngrams_article <- buildNgram1(texts=data$cleantext, 
+                              namespace=names, 
+                              Ngrams_correct=Ngrams_correct, 
+                              Ngrams_incorrect=Ngrams_incorrect, 
+                              min=2, max=7, 
+                              within="article") 
+  # VAR 1 - Ngram) Ngram variable type 1 - rates within data
+  ngrams_data <- buildNgram1(texts=data$cleantext, 
+                           namespace=names, 
+                           Ngrams_correct=Ngrams_correct, 
+                           Ngrams_incorrect=Ngrams_incorrect, 
+                           min=2, max=7,
+                           within="data") 
+  # VAR 1 - Ngram) Ngram variable type 2- rates within articles
+  ngrams_matched_article <- buildNgram2(texts=data$cleantext, 
+                                      namespace=names, 
+                                      Ngrams_correct=Ngrams_correct, 
+                                      Ngrams_incorrect=Ngrams_incorrect, 
+                                      min=2, max=7, 
+                                      within="article", 
+                                      nontopic.word="nontopic", topic.word="AVERB")
+  # VAR 1 - Ngram) Ngram variable type 2-  rates within data
+  ngrams_matched_data <- buildNgram2(texts=data$cleantext, 
+                                   namespace=names, 
+                                   Ngrams_correct=Ngrams_correct, 
+                                   Ngrams_incorrect=Ngrams_incorrect, 
+                                   min=2, max=7,
+                                   within="data",
+                                   nontopic.word="nontopic", topic.word="AVERB")
+  # VAR 2 - Frequency) how many times does this loc word appear?) 
+  # both within article (compared to other location words in the article?) 
+  # and within data (compared to other location words in the entire data set?) generated together
+  frequency <- buildFrequency(texts=data$cleantext, namespace=names, text.id=data$story_id)
+  
+  # VAR 3 - Context ) how many relevant words (eg. action verbs & key nouns) does the text contain? - output: both across (how many action verbs?) and within article ratios
+  materiality <- buildContext(texts=data$cleantext, solutions=data$province_human, namespace=names, verbs="AVERB")
+  # VAR 3 - Context ) how many IRrelevant words (eg. irrelvant verbs & nouns) does the text contain? - output: both across (how many action verbs?) and within article ratios
+  imateriality <- buildContext(texts=data$cleantext, solutions=data$province_human, namespace=names, verbs="NONTOPIC")
+  # compute Ngram frequencies and build data frame for covariates (training set )
+  
+  #combine all the produced variables (Y, X: Ngram frequencies, frequencies, & context)
+  formatted_data <- as.data.frame(cbind(binary_data,
+                                  ngrams_article, 
+                                  ngrams_data,
+                                  ngrams_matched_article,
+                                  ngrams_matched_data,
+                                  "frequency_data"=as.numeric(as.character(frequency$frequency_data)),
+                                  "frequency_article"=as.numeric(as.character(frequency$frequency_article)),
+                                  "materiality_data"=as.numeric(as.character(materiality$words_matched_data)),
+                                  "materiality_article"=as.numeric(as.character(materiality$words_matched_article)),
+                                  "imateriality_data"=as.numeric(as.character(imateriality$words_matched_data)),
+                                  "imateriality_article"=as.numeric(as.character(imateriality$words_matched_article))) )
+  return(formatted_data)
+}
+
+
 k<-9 # three 3-fold cross validation; 
 rf<-svm<-nnet<-logit<-rep(NA, k)
 variable_selection<-predicted<-s.id<-probabilities<-list(NULL)
@@ -45,6 +109,14 @@ set.seed(2016)
 sampled2<-sample(1:3, nrow(syria_data), replace=TRUE)
 set.seed(2017)
 sampled3<-sample(1:3, nrow(syria_data), replace=TRUE)
+
+## TODO:
+# - [X] Put the data formatting code into one function that gets called twice (once for train and once for test)
+# - [ ] Write code for generating possible rows from new text
+# - [ ] Figure out how to save and load SVM model
+
+
+i <- 1
 
 for(i in 1:k){
   ## Split the data into 2 sets: train set, test set
@@ -71,6 +143,9 @@ for(i in 1:k){
   #### Step 1-a: build corpus -- set1 (training set) ####
   data<-set1 
   # creating the "incorrect" Ngram corpus 
+  # Andy: got the following error:
+  #  Error in { : task 1 failed - "no applicable method for 'type' applied to an object of class "function"" 
+  # Andy: fixed by correcting types in dictionary_syria.R and sourcing
   Ngrams_incorrect<-incNgrams(texts=as.character(data$cleantext),     #corpora built using only the Ngrams from the training set
                               namespace=names,
                               solution=as.character(data$province_human), 
@@ -83,144 +158,13 @@ for(i in 1:k){
   
   
   #### Step 1-b: feature selection -- set1 (still the same training set) ####
-  data<-set1
-  
-  # build the Dependent variable based on human coding (1: correct event location, 0: otherwise)
-  binary_data<-buildY(texts=data$cleantext,  
-                      namespace=names,
-                      solution=as.character(data$province_human), 
-                      text_no=data$story_id)
-  
-  # VAR 1 - Ngram) Ngram variable type 1 - rates within articles
-  ngrams_article<-buildNgram1(texts=data$cleantext, 
-                              namespace=names, 
-                              Ngrams_correct=Ngrams_correct, 
-                              Ngrams_incorrect=Ngrams_incorrect, 
-                              min=2, max=7, 
-                              within="article") 
-  # VAR 1 - Ngram) Ngram variable type 1 - rates within data
-  ngrams_data<-buildNgram1(texts=data$cleantext, 
-                           namespace=names, 
-                           Ngrams_correct=Ngrams_correct, 
-                           Ngrams_incorrect=Ngrams_incorrect, 
-                           min=2, max=7,
-                           within="data") 
-  # VAR 1 - Ngram) Ngram variable type 2- rates within articles
-  ngrams_matched_article<-buildNgram2(texts=data$cleantext, 
-                                      namespace=names, 
-                                      Ngrams_correct=Ngrams_correct, 
-                                      Ngrams_incorrect=Ngrams_incorrect, 
-                                      min=2, max=7, 
-                                      within="article", 
-                                      nontopic.word="nontopic", topic.word="AVERB")
-  # VAR 1 - Ngram) Ngram variable type 2-  rates within data
-  ngrams_matched_data<-buildNgram2(texts=data$cleantext, 
-                                   namespace=names, 
-                                   Ngrams_correct=Ngrams_correct, 
-                                   Ngrams_incorrect=Ngrams_incorrect, 
-                                   min=2, max=7,
-                                   within="data",
-                                   nontopic.word="nontopic", topic.word="AVERB")
-  
-  
-  # VAR 2 - Frequency) how many times does this loc word appear?) 
-  # both within article (compared to other location words in the article?) 
-  # and within data (compared to other location words in the entire data set?) generated together
-  frequency<-buildFrequency(texts=data$cleantext, namespace=names, text.id=data$story_id)
-  
-  # VAR 3 - Context ) how many relevant words (eg. action verbs & key nouns) does the text contain? - output: both across (how many action verbs?) and within article ratios
-  materiality<-buildContext(texts=data$cleantext, solutions=data$province_human, namespace=names, verbs="AVERB")
-  # VAR 3 - Context ) how many IRrelevant words (eg. irrelvant verbs & nouns) does the text contain? - output: both across (how many action verbs?) and within article ratios
-  imateriality<-buildContext(texts=data$cleantext, solutions=data$province_human, namespace=names, verbs="NONTOPIC")
-  # compute Ngram frequencies and build data frame for covariates (training set )
-  
-  
-  #combine all the produced variables (Y, X: Ngram frequencies, frequencies, & context)
-  data_train<-as.data.frame(cbind(binary_data,
-                                  ngrams_article, 
-                                  ngrams_data,
-                                  ngrams_matched_article,
-                                  ngrams_matched_data,
-                                  "frequency_data"=as.numeric(as.character(frequency$frequency_data)),
-                                  "frequency_article"=as.numeric(as.character(frequency$frequency_article)),
-                                  "materiality_data"=as.numeric(as.character(materiality$words_matched_data)),
-                                  "materiality_article"=as.numeric(as.character(materiality$words_matched_article)),
-                                  "imateriality_data"=as.numeric(as.character(imateriality$words_matched_data)),
-                                  "imateriality_article"=as.numeric(as.character(imateriality$words_matched_article))
-  ) )
-  
-  
+  data_train <- feature_maker(set1, names, Ngrams_incorrect, Ngrams_correct)
   
   
   #### Step 1-c: feature selection -- set2 test set ####
-  data<-set2
-  # build the Dependent variable based on human coding (1: correct event location, 0: otherwise)
-  binary_data<-buildY(texts=data$cleantext,  
-                      namespace=names,
-                      solution=as.character(data$province_human), 
-                      text_no=data$story_id)
-  
-  # VAR 1 - Ngram) Ngram variable type 1 - rates within articles
-  ngrams_article<-buildNgram1(texts=data$cleantext, 
-                              namespace=names, 
-                              Ngrams_correct=Ngrams_correct, 
-                              Ngrams_incorrect=Ngrams_incorrect, 
-                              min=2, max=7, 
-                              within="article") 
-  # VAR 1 - Ngram) Ngram variable type 1 - rates within data
-  ngrams_data<-buildNgram1(texts=data$cleantext, 
-                           namespace=names, 
-                           Ngrams_correct=Ngrams_correct, 
-                           Ngrams_incorrect=Ngrams_incorrect, 
-                           min=2, max=7,
-                           within="data") 
-  # VAR 1 - Ngram) Ngram variable type 2- rates within articles
-  ngrams_matched_article<-buildNgram2(texts=data$cleantext, 
-                                      namespace=names, 
-                                      Ngrams_correct=Ngrams_correct, 
-                                      Ngrams_incorrect=Ngrams_incorrect, 
-                                      min=2, max=7, 
-                                      within="article", 
-                                      nontopic.word="nontopic", topic.word="AVERB")
-  # VAR 1 - Ngram) Ngram variable type 2-  rates within data
-  ngrams_matched_data<-buildNgram2(texts=data$cleantext, 
-                                   namespace=names, 
-                                   Ngrams_correct=Ngrams_correct, 
-                                   Ngrams_incorrect=Ngrams_incorrect, 
-                                   min=2, max=7,
-                                   within="data",
-                                   nontopic.word="nontopic", topic.word="AVERB")
-  
-  
-  # VAR 2 - Frequency) how many times does this loc word appear?) 
-  # both within article (compared to other location words in the article?) 
-  # and within data (compared to other location words in the entire data set?) generated together
-  frequency<-buildFrequency(texts=data$cleantext, namespace=names, text.id=data$story_id)
-  
-  # VAR 3 - Context ) how many relevant words (eg. action verbs & key nouns) does the text contain? - output: both across (how many action verbs?) and within article ratios
-  materiality<-buildContext(texts=data$cleantext, solutions=data$province_human, namespace=names, verbs="AVERB")
-  # VAR 3 - Context ) how many IRrelevant words (eg. irrelvant verbs & nouns) does the text contain? - output: both across (how many action verbs?) and within article ratios
-  imateriality<-buildContext(texts=data$cleantext, solutions=data$province_human, namespace=names, verbs="NONTOPIC")
-  # compute Ngram frequencies and build data frame for covariates (training set )
-  
-  
-  #combine all the produced variables (Y, X: Ngram frequencies, frequencies, & context)
-  data_test<-as.data.frame(cbind(binary_data,
-                                 ngrams_article, 
-                                 ngrams_data,
-                                 ngrams_matched_article,
-                                 ngrams_matched_data,
-                                 "frequency_data"=as.numeric(as.character(frequency$frequency_data)),
-                                 "frequency_article"=as.numeric(as.character(frequency$frequency_article)),
-                                 "materiality_data"=as.numeric(as.character(materiality$words_matched_data)),
-                                 "materiality_article"=as.numeric(as.character(materiality$words_matched_article)),
-                                 "imateriality_data"=as.numeric(as.character(imateriality$words_matched_data)),
-                                 "imateriality_article"=as.numeric(as.character(imateriality$words_matched_article))
-  ) )
-  
-  
-  
-  
+  data_test <- feature_maker(set2, names, Ngrams_incorrect, Ngrams_correct)
+
+   
   ######## Step 2: Classification Algorithms ########
   # clean up the 'Doparallel' environment for caret required for variable selection
   cl <- makeCluster(2)
@@ -231,7 +175,9 @@ for(i in 1:k){
   
   #### Step 2-a: Random Forest ####
   #trainining set
-  data<-data_train[complete.cases(data_train),] #the data created might contain NAs but the classifiers won't take NA values
+  data <- data_train[complete.cases(data_train),] #the data created might contain NAs but the classifiers won't take NA values
+  print(paste0("data_train rows: ", nrow(data_train)))
+  print(paste0("data rows: ", nrow(data)))
   
   # Variable selection: run the RFE algorithm for variable combinations
   control <- rfeControl(functions=rfFuncs, method="cv", number=10)
@@ -240,17 +186,21 @@ for(i in 1:k){
   variable_selection[[i]]<-results
   plot(results, type=c("g", "o"))
   no2keep<-results$results$Variables[which(results$results$Accuracy==max(results$results$Accuracy))]
-  temp<- as.data.frame(results$fit$importance)
-  trial2<-row.names(temp)[order(temp, decreasing=TRUE)][1:no2keep]
+  temp <- as.data.frame(results$fit$importance)
+  #trial2<-row.names(temp)[order(temp, decreasing=TRUE)][1:no2keep] # <-- this row results in all NAs.
+  # I'm pretty sure that we can get the same thing by just taking the rownames of `temp`, which are the 
+  #  54 variables that were selected. We'll lose the ordering, but I don't think that's a big deal.
+  trial2 <- row.names(temp)
   
   # classifier
-  data2<-as.data.frame(cbind("Y"=data$Y, data[, names(data) %in% trial2]) )
-  form<-as.formula(paste("Y~", paste(names(data2)[c(2:ncol(data2))], collapse="+") ) )
+  data2 <- as.data.frame(cbind("Y"=data$Y, data[, names(data) %in% trial2]) )
+  form <- as.formula(paste("Y~", paste(names(data2)[c(2:ncol(data2))], collapse="+") ) )
   randomf<-randomForest(form,data=data2,ntree=1000)
   varImpPlot(randomf, sort=TRUE)
   
   #test set - validation
   pred<-data_test[complete.cases(data_test),c(4:57)]
+  # Drop from 182 rows down to 176
   pred2<-pred[, names(pred) %in% trial2]
   pred.rf<-predict(randomf, pred2 , type="response") 
   predicted.data.rf<-predict(randomf, pred2, type="prob")
@@ -276,7 +226,7 @@ for(i in 1:k){
   tune.nn <- train(form, data = data2, method = "nnet", verbose=FALSE) 
   size<-tune.nn$finalModel$n[2]
   decay<-tune.nn$finalModel$decay
-  nn <- nnet(form, data=data2, size=size, decay=decay)
+  nn <- nnet::nnet(form, data=data2, size=size, decay=decay)  # add library
   # test set - validation
   nn.probs <- predict(nn, pred2)
   summary(nn.probs)
@@ -322,7 +272,7 @@ summary(logit)
 
 #just to make sure that files are saved in the correct directory!
 results_syria<-as.data.frame(cbind(rf,svm,nnet,logit))
-syria.results.path<-paste0(syria.path, "/results")
+syria.results.path<-paste0("results")
 setwd(syria.results.path)
 write.csv(results_syria, "results_syria.csv")
 
