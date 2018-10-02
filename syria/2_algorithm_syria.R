@@ -13,31 +13,40 @@ source("../Rcodes/functions.R", echo=T, print.eval = T)
 ## --> "syria_province" & "names" have been created.
 ## --> action verb dictionaries have been created as well.
 # But need the "names" object below. Copy over just that part
-syria_province <- read.csv("syria_province.csv")
-names <- c(str_trim(as.character(tolower(syria_province$governorate))))
-names <- unique(names[order(names)])
+prep_data <- function(cleantext_csv){
+  syria_province <- read.csv("syria_province.csv")
+  names <- c(str_trim(as.character(tolower(syria_province$governorate))))
+  names <- unique(names[order(names)])
+  
+  #load data
+  syria_data <- read.csv(cleantext_csv) #text files pre-treated. (output from 1_preprocessing_syria.R)
+  #syria_data<-read.csv('syria_cleantext_test.csv') #text files pre-treated. (output from 1_preprocessing_syria.R)
+  # make sure variables are in character strings (as opposed to factors)
+  # this data file contains a pretreated text variable named as 'cleantext'
+  syria_data$cleantext<-as.character(unlist(syria_data$cleantext)) 
+  # # nontopic words converted to "nontopic" (because the word "nonaverb" contains "averb" in it)
+  # syria_data$cleantext<-str_replace_all(syria_data$cleantext, "NONAVERB", "NONTOPIC")
+  # then the human coded variable
+  syria_data$province_human<-as.character(unlist(syria_data$province_human))
+  # and the province coded by OEDA
+  syria_data$province_OEDA<-as.character(unlist(syria_data$province_oeda))
+  # #some extra steps to make the var names consistent with other ICEWS data ... 
+  # syria_data$province_human[which(syria_data$province_human=="no_loc")]<-NA 
+  syria_data$story_id<-as.character(syria_data$id)
+  return(syria_data)
+}
 
-#load data
-syria_data<-read.csv('syria_cleantext.csv') #text files pre-treated. (output from text_treatment_syria.R)
-# make sure variables are in character strings (as opposed to factors)
-# this data file contains a pretreated text variable named as 'cleantext'
-syria_data$cleantext<-as.character(unlist(syria_data$cleantext)) 
-# # nontopic words converted to "nontopic" (because the word "nonaverb" contains "averb" in it)
-# syria_data$cleantext<-str_replace_all(syria_data$cleantext, "NONAVERB", "NONTOPIC")
-# then the human coded variable
-syria_data$province_human<-as.character(unlist(syria_data$province_human))
-# and the province coded by OEDA
-syria_data$province_OEDA<-as.character(unlist(syria_data$province_oeda))
-# #some extra steps to make the var names consistent with other ICEWS data ... 
-# syria_data$province_human[which(syria_data$province_human=="no_loc")]<-NA 
-syria_data$story_id<-as.character(syria_data$id)
-
-
+syria_data <- prep_data("syria_cleantext.csv")
 ######## Step 1:  Feature Selection ########
 
 
 feature_maker <- function(data, names, Ngrams_incorrect, Ngrams_correct){
   # build the Dependent variable based on human coding (1: correct event location, 0: otherwise)
+  # "names" is the vector of province names and used for dictionary-based NER.
+  # "data" must have the following columns:
+  #   - "cleantext" : the modified text of the article
+  #   - "province_human" : the comma and space-separated correct province names (okay to just leave out in production??)
+  #   - story_id
   binary_data <- buildY(texts=data$cleantext,  
                       namespace=names,
                       solution=as.character(data$province_human), 
@@ -112,11 +121,11 @@ sampled3<-sample(1:3, nrow(syria_data), replace=TRUE)
 
 ## TODO:
 # - [X] Put the data formatting code into one function that gets called twice (once for train and once for test)
-# - [ ] Write code for generating possible rows from new text
-# - [ ] Figure out how to save and load SVM model
+# - [X] Figure out input data format
+# - [?] Write code for generating possible rows from new text
+# - [X] Figure out how to save and load SVM model
+# - [ ] How to handle missing values in precision-recall numbers
 
-
-i <- 1
 
 for(i in 1:k){
   ## Split the data into 2 sets: train set, test set
@@ -124,38 +133,39 @@ for(i in 1:k){
   
   if(i==1|i==2|i==3){
     sampled<-sampled1
-    t<-i
+    t <- i
   }
   if(i==4|i==5|i==6){
     sampled<-sampled2
-    t<- i-3
+    t <- i-3
   }
   if(i==7|i==8|i==9){
     sampled<-sampled3
-    t<- i-6
+    t <- i-6
   }
   
   #set1 - train set ; set2 - test set
-  set2<-syria_data[sampled==t,]
-  set1<-syria_data[sampled!=t,]
+  set2 <- syria_data[sampled==t,]
+  set1 <- syria_data[sampled!=t,]
   
   
   #### Step 1-a: build corpus -- set1 (training set) ####
-  data<-set1 
+  data <- set1 
   # creating the "incorrect" Ngram corpus 
   # Andy: got the following error:
   #  Error in { : task 1 failed - "no applicable method for 'type' applied to an object of class "function"" 
-  # Andy: fixed by correcting types in dictionary_syria.R and sourcing
-  Ngrams_incorrect<-incNgrams(texts=as.character(data$cleantext),     #corpora built using only the Ngrams from the training set
+  # Andy: fixed by correcting typos in dictionary_syria.R and sourcing
+  Ngrams_incorrect <- incNgrams(texts=as.character(data$cleantext),     #corpora built using only the Ngrams from the training set
                               namespace=names,
                               solution=as.character(data$province_human), 
                               min=2, max=7)
+  save(Ngrams_incorrect, file = "Ngrams_incorrect.RData")
   # creating the "correct" Ngram corpus  
-  Ngrams_correct<-corNgrams(texts=as.character(data$cleantext),     #corpora built using only the Ngrams from the training set
+  Ngrams_correct <- corNgrams(texts=as.character(data$cleantext),     #corpora built using only the Ngrams from the training set
                             namespace=names,
                             solution=as.character(data$province_human),
                             min=2, max=7)
-  
+  save(Ngrams_correct, file = "Ngrams_correct.RData")
   
   #### Step 1-b: feature selection -- set1 (still the same training set) ####
   data_train <- feature_maker(set1, names, Ngrams_incorrect, Ngrams_correct)
@@ -163,6 +173,9 @@ for(i in 1:k){
   
   #### Step 1-c: feature selection -- set2 test set ####
   data_test <- feature_maker(set2, names, Ngrams_incorrect, Ngrams_correct)
+  
+  #### Step 1-d: All data for training the "production" SVM
+  data_prod <- feature_maker(syria_data, names, Ngrams_incorrect, Ngrams_correct)
 
    
   ######## Step 2: Classification Algorithms ########
@@ -211,14 +224,18 @@ for(i in 1:k){
   
   # #### Step 2-b: SVM ####
   #tune parameters
-  tune.out=tune.svm(form, data=data2, kernel="radial", decision.values = TRUE, probability=TRUE)
+  tune.out <- tune.svm(form, data=data2, kernel="radial", decision.values = TRUE, probability=TRUE)
+  # train a model using all the data for use on a new set of data
+  svm_production <- tune.svm(form, data=data_prod, kernel="radial", decision.values = TRUE, probability=TRUE)  # all data
+  save(svm_production, file = "best_svm.RData")
   
   # test set - validation
-  pred.svm = predict(tune.out$best.model, pred2, decision.values = TRUE, probability = TRUE)
-  predicted.data.svm<-attr(pred.svm, "probabilities") 
-  probabilities[[i+k]]<-predicted.data.svm[,which(colnames(predicted.data.svm)=="1")] # probabilities that the observation has Y = 1 (true event location) 
-  svm[i]<-mean(pred.svm == data_test$Y[complete.cases(data_test)]) # if you want to see the score, check out the value in this line
-  predicted[[i+k]]<-pred.svm
+  pred.svm <- predict(tune.out$best.model, pred2, decision.values = TRUE, probability = TRUE)
+  
+  predicted.data.svm <- attr(pred.svm, "probabilities") 
+  probabilities[[i+k]] <- predicted.data.svm[,which(colnames(predicted.data.svm)=="1")] # probabilities that the observation has Y = 1 (true event location) 
+  svm[i] <- mean(pred.svm == data_test$Y[complete.cases(data_test)]) # if you want to see the score, check out the value in this line
+  predicted[[i+k]] <- pred.svm
   
   
   #### Step 2-c:  Neural Net ####
@@ -249,6 +266,24 @@ for(i in 1:k){
   
 }
 
+##### PREDICTING ON NEW DATA ########
+
+# 1. read in the new file
+syria_predict <- prep_data('syria_cleantext_test.csv') #text files pre-treated. (output from 1_preprocessing_syria.R)
+
+# 2. generate df of possible rows
+# (don't re-run Ngrams because we don't have labels and we don't want to change them)
+#  (still not completely sure what each one does)
+data_featured <- feature_maker(syria_predict, names, Ngrams_incorrect, Ngrams_correct)
+# need to keep track of what gets dropped and include in final calc.
+for_prediction <- data_featured[complete.cases(data_featured),c(4:57)] 
+# getting hammered by missing values!!
+for_prediction <- for_prediction[, names(for_prediction) %in% trial2]  # need to save and load this
+
+# 3. apply the SVM
+predicted <- predict(svm_production$best.model, for_prediction, decision.values = TRUE, probability = TRUE)
+
+#### ANALYSIS SECTION ######
 
 summary(rf)
 summary(svm)
@@ -263,16 +298,12 @@ summary(logit)
 
 
 
-
-
-
-
 ######### SAVING RESULTS ############
 
 
 #just to make sure that files are saved in the correct directory!
 results_syria<-as.data.frame(cbind(rf,svm,nnet,logit))
-syria.results.path<-paste0("results")
+syria.results.path <- "results/"
 setwd(syria.results.path)
 write.csv(results_syria, "results_syria.csv")
 
