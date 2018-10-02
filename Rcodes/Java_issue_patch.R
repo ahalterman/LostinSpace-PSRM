@@ -22,7 +22,7 @@ corNgrams<-function(texts, namespace, solution, min, max){#build lists with ngra
   Ngrams_correct <<- foreach(m=min:max) %dopar%{#parallelization
     # call necessary functions in the new cluster  
     require(stringr) #str_detect
-    require(RWeka) #NGramTokenizer
+    #require(RWeka) #NGramTokenizer
     
     
     Ngrams_correct=list(NULL)    
@@ -120,7 +120,7 @@ incNgrams<-function(texts, namespace, solution, min, max){ ##build lists with ng
   Ngrams_incorrect <<- foreach(m=min:max) %dopar%{#parallelization
     # call necessary functions in the new cluster  
     library(stringr) #str_detect
-    library(RWeka) #NGramTokenizer
+    #library(RWeka) #NGramTokenizer
     
     
     Ngrams_incorrect=list(NULL)
